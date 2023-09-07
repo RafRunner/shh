@@ -58,22 +58,14 @@ pub fn encode_image(input_image: &DynamicImage, payload: Payload) -> Result<Dyna
     );
     write_encoded_bytes_to_output(&mut output, &payload, &chunks, &mut current_chunk);
 
-    for i in current_chunk..chunks.len() {
-        for byte in chunks[i] {
-            output.push(byte);
-        }
+    for i in output.len()..image_bytes.len() {
+        output.push(image_bytes[i]);
     }
 
-    while output.len() < image_bytes.len() {
-        output.push(image_bytes[output.len() - 1]);
-    }
+    let image_buffer: ImageBuffer<Rgb<u8>, Vec<u8>> =
+        ImageBuffer::from_raw(width, height, output).unwrap();
 
-    let image_buffer: Option<ImageBuffer<Rgb<u8>, Vec<u8>>> =
-        ImageBuffer::from_raw(width, height, output);
-
-    Ok(image_buffer
-        .map(|buffer| DynamicImage::ImageRgb8(buffer))
-        .unwrap())
+    Ok(DynamicImage::ImageRgb8(image_buffer))
 }
 
 pub fn decode_image(image: &DynamicImage) -> Result<Vec<u8>> {
@@ -89,7 +81,7 @@ pub fn decode_image(image: &DynamicImage) -> Result<Vec<u8>> {
 
     for i in 0..8 {
         for j in 0..8 {
-            payload_size |= (((chunks[i][j] & 0b0000_0001) << j) as usize) << (i * 8);
+            payload_size |= (((chunks[i][j] & 0b0000_0001) << j) as usize) << i * 8;
         }
     }
 

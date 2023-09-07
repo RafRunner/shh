@@ -10,9 +10,9 @@ pub mod encode_decode;
 
 #[derive(Debug)]
 pub struct Config {
-    pub input_image: DynamicImage,
-    pub operaion: OperationType,
-    pub output_path: PathBuf,
+    input_image: DynamicImage,
+    operaion: OperationType,
+    output_path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -78,7 +78,7 @@ impl Config {
             }
             OperationType::Decode => {
                 let decoded = decode_image(&self.input_image)?;
-                fs::write("decoded.jpeg", decoded)?;
+                fs::write(self.output_path, decoded)?;
             }
         };
 
@@ -88,7 +88,7 @@ impl Config {
     fn get_output_image(args: &[String], index: usize) -> PathBuf {
         PathBuf::from(
             args.get(index)
-                .map(|path| format!("{path}.png"))
+                .map(|path| path.clone())
                 .unwrap_or(String::from("output.png")),
         )
     }
