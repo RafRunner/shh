@@ -1,7 +1,7 @@
 use crate::encode_decode::{decode_image, encode_image};
 use image::GenericImageView;
 use image::{io::Reader as ImageReader, DynamicImage};
-use std::fs::{self, read};
+use std::fs::{self};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
@@ -45,7 +45,7 @@ impl Config {
                     return Err(anyhow!("please provide a payload (file or string)",));
                 }
 
-                let payload: Payload = match read(PathBuf::from(&args[2])) {
+                let payload: Payload = match fs::read(&args[2]) {
                     Ok(bytes) => Payload::File(bytes),
                     Err(_) => Payload::Literal(args[1].clone()),
                 };
@@ -53,13 +53,13 @@ impl Config {
                 Ok(Self {
                     input_image,
                     operaion: OperationType::Encode(payload),
-                    output_path: Self::get_output_image(args, 3),
+                    output_path: Self::get_output_path(args.get(3), ".png"),
                 })
             }
             "d" | "decode" => Ok(Self {
                 input_image,
                 operaion: OperationType::Decode,
-                output_path: Self::get_output_image(args, 2),
+                output_path: Self::get_output_path(args.get(2), ""),
             }),
             _ => Err(anyhow!(
                 "{} is not a valid operation. use d|decode or e|encode",
@@ -85,10 +85,10 @@ impl Config {
         Ok(())
     }
 
-    fn get_output_image(args: &[String], index: usize) -> PathBuf {
+    fn get_output_path(provided: Option<&String>, postfix: &str) -> PathBuf {
         PathBuf::from(
-            args.get(index)
-                .map(|path| path.clone())
+            provided
+                .map(|path| path.to_owned() + postfix)
                 .unwrap_or(String::from("output.png")),
         )
     }
