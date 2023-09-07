@@ -1,3 +1,8 @@
+use anyhow::{anyhow, Result};
+use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb};
+
+use crate::Payload;
+
 pub fn encode_byte_in_bytes(target: &[u8; 8], payload: &u8) -> [u8; 8] {
     let mut mask: u8 = 0b0000_0001;
     let mut result: [u8; 8] = [0; 8];
@@ -28,6 +33,99 @@ pub fn u64_to_u8_array(value: &u64) -> [u8; 8] {
     }
 
     result
+}
+
+pub fn encode_image(input_image: &DynamicImage, payload: Payload) -> Result<DynamicImage> {
+    let payload_size = payload.size() as u64;
+    let payload_size_bytes = u64_to_u8_array(&payload_size);
+    let payload = payload.into_bytes();
+
+    let (width, height) = input_image.dimensions();
+    let image_bytes = input_image.to_rgb8().into_raw();
+    let chunks: Vec<[u8; 8]> = image_bytes
+        .chunks_exact(8)
+        .map(|chunk| chunk.try_into().expect("Impossible"))
+        .collect();
+
+    let mut output: Vec<u8> = Vec::new();
+    let mut current_chunk = 0;
+
+    write_encoded_bytes_to_output(
+        &mut output,
+        &payload_size_bytes,
+        &chunks,
+        &mut current_chunk,
+    );
+    write_encoded_bytes_to_output(&mut output, &payload, &chunks, &mut current_chunk);
+
+    for i in current_chunk..chunks.len() {
+        for byte in chunks[i] {
+            output.push(byte);
+        }
+    }
+
+    while output.len() < image_bytes.len() {
+        output.push(image_bytes[output.len() - 1]);
+    }
+
+    let image_buffer: Option<ImageBuffer<Rgb<u8>, Vec<u8>>> =
+        ImageBuffer::from_raw(width, height, output);
+
+    Ok(image_buffer
+        .map(|buffer| DynamicImage::ImageRgb8(buffer))
+        .unwrap())
+}
+
+pub fn decode_image(image: &DynamicImage) -> Result<Vec<u8>> {
+    let image_bytes = image.to_rgb8().into_raw();
+    let chunks: Vec<[u8; 8]> = image_bytes
+        .chunks_exact(8)
+        .map(|chunk| chunk.try_into().expect("Impossible"))
+        .collect();
+
+    let mut decoded: Vec<u8> = Vec::new();
+
+    let mut payload_size: usize = 0;
+
+    for i in 0..8 {
+        for j in 0..8 {
+            payload_size |= (((chunks[i][j] & 0b0000_0001) << j) as usize) << (i * 8);
+        }
+    }
+
+    if payload_size + 8 > chunks.len() {
+        return Err(anyhow!(
+            "This image probably wasn't encoded. The encoded length is bigger then expected"
+        ));
+    }
+
+    for i in 8..(8 + payload_size) {
+        let encoded = chunks[i];
+        let mut decoded_byte = 0 as u8;
+
+        for j in 0..8 {
+            decoded_byte |= (encoded[j] & 0b0000_0001) << j;
+        }
+
+        decoded.push(decoded_byte);
+    }
+
+    Ok(decoded)
+}
+
+fn write_encoded_bytes_to_output(
+    output: &mut Vec<u8>,
+    payload: &[u8],
+    chunks: &Vec<[u8; 8]>,
+    current_chunk: &mut usize,
+) {
+    for bytes in payload {
+        let encoded = encode_byte_in_bytes(&chunks[*current_chunk], &bytes);
+        for byte in encoded {
+            output.push(byte);
+        }
+        *current_chunk += 1;
+    }
 }
 
 #[cfg(test)]

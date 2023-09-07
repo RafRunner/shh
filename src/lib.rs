@@ -1,7 +1,7 @@
-use crate::encode_decode::{encode_byte_in_bytes, u64_to_u8_array};
+use crate::encode_decode::{decode_image, encode_image};
+use image::GenericImageView;
 use image::{io::Reader as ImageReader, DynamicImage};
-use image::{GenericImageView, ImageBuffer, Rgb};
-use std::fs::read;
+use std::fs::{self, read};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
@@ -11,8 +11,8 @@ pub mod encode_decode;
 #[derive(Debug)]
 pub struct Config {
     pub input_image: DynamicImage,
-    pub payload: Payload,
-    pub output_image: PathBuf,
+    pub operaion: OperationType,
+    pub output_path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -21,133 +21,94 @@ pub enum Payload {
     Literal(String),
 }
 
-pub fn encode_image(config: Config) -> Result<DynamicImage> {
-    config.validate_config()?;
-
-    let payload_size = config.payload.size() as u64;
-    let payload_size_bytes = u64_to_u8_array(&payload_size);
-    let payload = config.payload.into_bytes();
-
-    let (width, height) = config.input_image.dimensions();
-    let image_bytes = config.input_image.to_rgb8().into_raw();
-    let chunks: Vec<[u8; 8]> = image_bytes
-        .chunks_exact(8)
-        .map(|chunk| chunk.try_into().expect("Impossible"))
-        .collect();
-
-    let mut output: Vec<u8> = Vec::new();
-    let mut current_chunk = 0;
-
-    for bytes in payload_size_bytes {
-        let encoded = encode_byte_in_bytes(&chunks[current_chunk], &bytes);
-        for byte in encoded {
-            output.push(byte);
-        }
-        current_chunk += 1;
-    }
-
-    for bytes in payload {
-        let encoded = encode_byte_in_bytes(&chunks[current_chunk], &bytes);
-        for byte in encoded {
-            output.push(byte);
-        }
-        current_chunk += 1;
-    }
-
-    for i in current_chunk..chunks.len() {
-        for byte in chunks[i] {
-            output.push(byte);
-        }
-    }
-
-    while output.len() < image_bytes.len() {
-        output.push(image_bytes[output.len() - 1]);
-    }
-
-    let image_buffer: Option<ImageBuffer<Rgb<u8>, Vec<u8>>> =
-        ImageBuffer::from_raw(width, height, output);
-
-    Ok(image_buffer
-        .map(|buffer| DynamicImage::ImageRgb8(buffer))
-        .unwrap())
-}
-
-pub fn decode_image(image: &DynamicImage) -> Result<Vec<u8>> {
-    let image_bytes = image.to_rgb8().into_raw();
-    let chunks: Vec<[u8; 8]> = image_bytes
-        .chunks_exact(8)
-        .map(|chunk| chunk.try_into().expect("Impossible"))
-        .collect();
-
-    let mut decoded: Vec<u8> = Vec::new();
-
-    let mut payload_size: usize = 0;
-
-    for i in 0..8 {
-        for j in 0..8 {
-            payload_size |= (((chunks[i][j] & 0b0000_0001) << j) as usize) << (i * 8);
-        }
-    }
-
-    if payload_size + 8 > chunks.len() {
-        return Err(anyhow!(
-            "This image probably wasn't encoded. The encoded length is bigger then expected"
-        ));
-    }
-
-    for i in 8..(8 + payload_size) {
-        let encoded = chunks[i];
-        let mut decoded_byte = 0 as u8;
-
-        for j in 0..8 {
-            decoded_byte |= (encoded[j] & 0b0000_0001) << j;
-        }
-
-        decoded.push(decoded_byte);
-    }
-
-    Ok(decoded)
+#[derive(Debug)]
+pub enum OperationType {
+    Encode(Payload),
+    Decode,
 }
 
 impl Config {
     pub fn build(args: &[String]) -> Result<Self> {
         if args.len() < 2 {
             return Err(anyhow!(
-                "You need to provide at least two arguments: an input image and a payload",
+                "usage: shh <operaion: encode or decode>:
+                    shh e <target image> <payload (file or string)> <output file (optional)>
+                    shh d <encoded image> <output file (optional)>",
             ));
         }
 
-        let input_image = read_image(&args[0])?;
+        let input_image = read_image(&args[1])?;
 
-        let payload: Payload = match read(PathBuf::from(&args[1])) {
-            Ok(bytes) => Payload::File(bytes),
-            Err(_) => Payload::Literal(args[1].clone()),
+        match &(*args[0]) {
+            "e" | "encode" => {
+                if args.len() < 3 {
+                    return Err(anyhow!("please provide a payload (file or string)",));
+                }
+
+                let payload: Payload = match read(PathBuf::from(&args[2])) {
+                    Ok(bytes) => Payload::File(bytes),
+                    Err(_) => Payload::Literal(args[1].clone()),
+                };
+
+                Ok(Self {
+                    input_image,
+                    operaion: OperationType::Encode(payload),
+                    output_path: Self::get_output_image(args, 3),
+                })
+            }
+            "d" | "decode" => Ok(Self {
+                input_image,
+                operaion: OperationType::Decode,
+                output_path: Self::get_output_image(args, 2),
+            }),
+            _ => Err(anyhow!(
+                "{} is not a valid operation. use d|decode or e|encode",
+                args[0]
+            )),
+        }
+    }
+
+    pub fn run(self) -> Result<()> {
+        self.validate_config()?;
+
+        match self.operaion {
+            OperationType::Encode(payload) => {
+                let encoded = encode_image(&self.input_image, payload)?;
+                encoded.save(self.output_path)?;
+            }
+            OperationType::Decode => {
+                let decoded = decode_image(&self.input_image)?;
+                fs::write("decoded.jpeg", decoded)?;
+            }
         };
 
-        let output_image = args
-            .get(2)
-            .map(|path| format!("{path}.png"))
-            .unwrap_or(String::from("output.png"));
+        Ok(())
+    }
 
-        Ok(Self {
-            input_image,
-            payload,
-            output_image: PathBuf::from(output_image),
-        })
+    fn get_output_image(args: &[String], index: usize) -> PathBuf {
+        PathBuf::from(
+            args.get(index)
+                .map(|path| format!("{path}.png"))
+                .unwrap_or(String::from("output.png")),
+        )
     }
 
     fn validate_config(&self) -> Result<()> {
-        // TODO return some recoverable error in case so the user can write the image in the 2 LSBs
-        if self.payload.size() * 8 > self.input_image_rgb_bytes() {
-            Err(anyhow!("The payload is too big to be coded in the input image. Choose a bigger image or compress the payload."))
-        } else {
-            Ok(())
+        match &self.operaion {
+            OperationType::Decode => Ok(()),
+            OperationType::Encode(payload) => {
+                // TODO return some recoverable error in case so the user can write the image in the 2 LSBs
+                if payload.size() * 8 > self.input_image_rgb_bytes() {
+                    Err(anyhow!("The payload is too big to be coded in the input image. Choose a bigger image (in resolution) or compress the payload."))
+                } else {
+                    Ok(())
+                }
+            }
         }
     }
 
     fn input_image_rgb_bytes(&self) -> usize {
         let (width, height) = self.input_image.dimensions();
-
         width as usize * height as usize * 3
     }
 }
@@ -179,7 +140,10 @@ fn read_image<P: AsRef<Path>>(path: P) -> Result<DynamicImage> {
             Ok(image) => Ok(image),
             Err(e) => {
                 dbg!(e);
-                Err(anyhow!("File '{}' is not an image.", path_ref.display()))
+                Err(anyhow!(
+                    "File '{}' is not an image or has the wrong format.",
+                    path_ref.display()
+                ))
             }
         },
         Err(e) => {

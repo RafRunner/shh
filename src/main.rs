@@ -1,6 +1,6 @@
 use anyhow::Result;
-use shh::{decode_image, encode_image, Config};
-use std::{env, fs, process};
+use shh::Config;
+use std::{env, process};
 
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -10,14 +10,5 @@ fn main() -> Result<()> {
         process::exit(1);
     });
 
-    let out = config.output_image.clone();
-    let encoded = encode_image(config)?;
-
-    encoded.save(out)?;
-
-    let decoded = decode_image(&encoded)?;
-
-    fs::write("decoded.jpeg", decoded)?;
-
-    Ok(())
+    config.run()
 }
