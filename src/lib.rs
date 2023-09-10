@@ -98,7 +98,7 @@ impl Config {
             OperationType::Decode => Ok(()),
             OperationType::Encode(payload) => {
                 // TODO return some recoverable error in case so the user can write the image in the 2 LSBs
-                if payload.size() * 8 > self.input_image_rgb_bytes() {
+                if payload.size() * 8 + 8 > self.input_image_rgb_bytes() {
                     Err(anyhow!("The payload is too big to be coded in the input image. Choose a bigger image (in resolution) or compress the payload."))
                 } else {
                     Ok(())

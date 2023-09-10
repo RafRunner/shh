@@ -42,21 +42,17 @@ pub fn encode_image(input_image: &DynamicImage, payload: Payload) -> Result<Dyna
 
     let (width, height) = input_image.dimensions();
     let image_bytes = input_image.to_rgb8().into_raw();
-    let chunks: Vec<[u8; 8]> = image_bytes
+    let chunks = image_bytes
         .chunks_exact(8)
         .map(|chunk| chunk.try_into().expect("Impossible"))
+        .take(payload.len() + 8);
+
+    let mut output: Vec<u8> = payload_size_bytes
+        .iter()
+        .chain(payload.iter())
+        .zip(chunks)
+        .flat_map(|(payload, chunk)| encode_byte_in_bytes(chunk, payload))
         .collect();
-
-    let mut output: Vec<u8> = Vec::new();
-    let mut current_chunk = 0;
-
-    write_encoded_bytes_to_output(
-        &mut output,
-        &payload_size_bytes,
-        &chunks,
-        &mut current_chunk,
-    );
-    write_encoded_bytes_to_output(&mut output, &payload, &chunks, &mut current_chunk);
 
     for i in output.len()..image_bytes.len() {
         output.push(image_bytes[i]);
@@ -76,7 +72,6 @@ pub fn decode_image(image: &DynamicImage) -> Result<Vec<u8>> {
         .collect();
 
     let mut decoded: Vec<u8> = Vec::new();
-
     let mut payload_size: usize = 0;
 
     for i in 0..8 {
@@ -103,21 +98,6 @@ pub fn decode_image(image: &DynamicImage) -> Result<Vec<u8>> {
     }
 
     Ok(decoded)
-}
-
-fn write_encoded_bytes_to_output(
-    output: &mut Vec<u8>,
-    payload: &[u8],
-    chunks: &Vec<[u8; 8]>,
-    current_chunk: &mut usize,
-) {
-    for bytes in payload {
-        let encoded = encode_byte_in_bytes(&chunks[*current_chunk], &bytes);
-        for byte in encoded {
-            output.push(byte);
-        }
-        *current_chunk += 1;
-    }
 }
 
 #[cfg(test)]
