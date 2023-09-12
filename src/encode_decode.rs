@@ -28,8 +28,8 @@ pub fn encode_image(input_image: &DynamicImage, payload: Payload) -> Result<Dyna
 
     output.reserve(image_bytes.len() - output.len());
 
-    for i in output.len()..image_bytes.len() {
-        output.push(image_bytes[i]);
+    for byte in image_bytes.into_iter().skip(output.len()) {
+        output.push(byte);
     }
 
     let image_buffer: ImageBuffer<Rgb<u8>, Vec<u8>> =
@@ -49,7 +49,7 @@ pub fn decode_image(image: &DynamicImage) -> Result<Vec<u8>> {
             chunks
                 .by_ref()
                 .take(8)
-                .map(|encoded| decode_byte(encoded))
+                .map(decode_byte)
                 .collect::<Vec<u8>>(),
         )
         .unwrap(),
@@ -74,6 +74,7 @@ pub fn decode_image(image: &DynamicImage) -> Result<Vec<u8>> {
 
 fn image_rgb_bytes_size(image: &DynamicImage) -> usize {
     let (width, height) = image.dimensions();
+    // No realistic image should overflow this
     width as usize * height as usize * 3
 }
 
@@ -113,8 +114,8 @@ fn decode_byte(encoded: &[u8; 8]) -> u8 {
 
     let mut decoded: u8 = 0;
 
-    for i in 0..8 {
-        decoded |= (mask & encoded[i]) << i;
+    for (i, byte) in encoded.iter().enumerate().take(8) {
+        decoded |= (mask & byte) << i;
     }
 
     decoded

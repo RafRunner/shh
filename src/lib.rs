@@ -86,7 +86,7 @@ impl Config {
         PathBuf::from(
             provided
                 .map(|path| path.to_owned() + postfix)
-                .unwrap_or(String::from("output.png")),
+                .unwrap_or_else(|| String::from("output.png")),
         )
     }
 }
