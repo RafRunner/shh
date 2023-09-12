@@ -3,30 +3,10 @@ use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb};
 
 use crate::Payload;
 
-pub fn encode_byte_in_bytes(target: &[u8; 8], payload: &u8) -> [u8; 8] {
-    let mut mask: u8 = 0b0000_0001;
-    let mut result: [u8; 8] = [0; 8];
-
-    for i in 0..8 {
-        let current_bit = payload & mask;
-
-        let encoded = if current_bit != 0 {
-            target[i] | 0b0000_0001
-        } else {
-            target[i] & 0b1111_1110
-        };
-
-        result[i] = encoded;
-        mask <<= 1;
-    }
-
-    result
-}
-
 pub fn encode_image(input_image: &DynamicImage, payload: Payload) -> Result<DynamicImage> {
     let payload_size = payload.size();
 
-    if payload_size * 8 + 8 > image_rgb_bytes_size(input_image) {
+    if !payload_fits(payload_size, image_rgb_bytes_size(input_image)) {
         return Err(anyhow!(
             "The payload is too big to be coded in the input image. Choose a bigger image (in resolution) or compress the payload."
         ));
@@ -37,10 +17,7 @@ pub fn encode_image(input_image: &DynamicImage, payload: Payload) -> Result<Dyna
 
     let (width, height) = input_image.dimensions();
     let image_bytes = input_image.to_rgb8().into_raw();
-    let chunks = image_bytes
-        .chunks_exact(8)
-        .map(|chunk| chunk.try_into().expect("Impossible"))
-        .take(payload.len() + 8);
+    let chunks = create_byte_chunks(&image_bytes).take(payload.len() + 8);
 
     let mut output: Vec<u8> = payload_size_bytes
         .iter()
@@ -48,6 +25,8 @@ pub fn encode_image(input_image: &DynamicImage, payload: Payload) -> Result<Dyna
         .zip(chunks)
         .flat_map(|(payload, chunk)| encode_byte_in_bytes(chunk, payload))
         .collect();
+
+    output.reserve(image_bytes.len() - output.len());
 
     for i in output.len()..image_bytes.len() {
         output.push(image_bytes[i]);
@@ -60,43 +39,34 @@ pub fn encode_image(input_image: &DynamicImage, payload: Payload) -> Result<Dyna
 }
 
 pub fn decode_image(image: &DynamicImage) -> Result<Vec<u8>> {
+    check_minimum_image_size(image)?;
     let image_bytes = image.to_rgb8().into_raw();
 
-    if image_bytes.len() < 64 {
-        return Err(anyhow!("Input image is too small."));
-    }
+    let mut chunks = create_byte_chunks(&image_bytes);
 
-    let chunks: Vec<[u8; 8]> = image_bytes
-        .chunks_exact(8)
-        .map(|chunk| chunk.try_into().expect("Impossible"))
-        .collect();
-
-    let mut decoded: Vec<u8> = Vec::new();
-    let mut payload_size: u64 = 0;
-
-    for i in 0..8 {
-        for j in 0..8 {
-            payload_size |= (((chunks[i][j] & 0b0000_0001) << j) as u64) << i * 8;
-        }
-    }
+    let payload_size: u64 = u64::from_le_bytes(
+        <[u8; 8]>::try_from(
+            chunks
+                .by_ref()
+                .take(8)
+                .map(|encoded| decode_byte(encoded))
+                .collect::<Vec<u8>>(),
+        )
+        .unwrap(),
+    );
 
     let payload_size: usize = u64_to_usize(payload_size)?;
 
-    if payload_size + 8 > chunks.len() {
+    if !payload_fits(payload_size, image_bytes.len()) {
         return Err(anyhow!(
             "This image probably wasn't encoded. The encoded length is bigger then expected"
         ));
     }
 
-    for i in 8..(8 + payload_size) {
-        let encoded = chunks[i];
-        let mut decoded_byte = 0 as u8;
+    let mut decoded: Vec<u8> = Vec::with_capacity(payload_size);
 
-        for j in 0..8 {
-            decoded_byte |= (encoded[j] & 0b0000_0001) << j;
-        }
-
-        decoded.push(decoded_byte);
+    for chunk in chunks.take(payload_size) {
+        decoded.push(decode_byte(chunk));
     }
 
     Ok(decoded)
@@ -115,6 +85,60 @@ fn u64_to_usize(value: u64) -> Result<usize> {
             "Payload size {} is too big for this platform",
             value
         ))
+    }
+}
+
+fn encode_byte_in_bytes(target: &[u8; 8], payload: &u8) -> [u8; 8] {
+    let mut mask: u8 = 0b0000_0001;
+    let mut result: [u8; 8] = [0; 8];
+
+    for i in 0..8 {
+        let current_bit = payload & mask;
+
+        let encoded = if current_bit != 0 {
+            target[i] | 0b1000_0000
+        } else {
+            target[i] & 0b0111_1111
+        };
+
+        result[i] = encoded;
+        mask <<= 1;
+    }
+
+    result
+}
+
+fn decode_byte(encoded: &[u8; 8]) -> u8 {
+    let mask: u8 = 0b0000_0001;
+
+    let mut decoded: u8 = 0;
+
+    for i in 0..8 {
+        decoded |= (mask & encoded[i]) << i;
+    }
+
+    decoded
+}
+
+fn create_byte_chunks(image_bytes: &[u8]) -> impl Iterator<Item = &[u8; 8]> {
+    image_bytes
+        .chunks_exact(8)
+        .map(|chunk| chunk.try_into().unwrap())
+}
+
+fn payload_fits(payload_size: usize, image_rgb_size: usize) -> bool {
+    payload_size
+        .checked_mul(8)
+        .and_then(|it| it.checked_add(8))
+        .map(|it| it <= image_rgb_size)
+        .unwrap_or(false)
+}
+
+fn check_minimum_image_size(image: &DynamicImage) -> Result<()> {
+    if image_rgb_bytes_size(image) < 64 {
+        Err(anyhow!("Input image is too small."))
+    } else {
+        Ok(())
     }
 }
 
@@ -241,5 +265,30 @@ mod tests {
                 0b0101_0101
             ]
         );
+    }
+
+    #[test]
+    fn test_payload_fits() {
+        assert!(payload_fits(1, 16));
+        assert!(payload_fits(100, 1000000));
+        assert!(payload_fits(1000, 8009));
+        assert!(!payload_fits(1000, 8007));
+        assert!(!payload_fits(usize::MAX, usize::MAX));
+        assert!(!payload_fits(usize::MAX - 10, usize::MAX));
+    }
+
+    #[test]
+    fn test_decode_byte() {
+        // Case 1: All zeroes
+        let encoded: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(decode_byte(&encoded), 0);
+
+        // Case 2: All ones
+        let encoded: [u8; 8] = [11, 19, 101, 17, 25, 1, 13, 1];
+        assert_eq!(decode_byte(&encoded), 0b1111_1111);
+
+        // Case 3: Alternate zeroes and ones
+        let encoded: [u8; 8] = [8, 1, 12, 13, 78, 236, 116, 11];
+        assert_eq!(decode_byte(&encoded), 0b1000_1010);
     }
 }
