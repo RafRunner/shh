@@ -1,5 +1,4 @@
 use crate::encode_decode::{decode_image, encode_image};
-use image::GenericImageView;
 use image::{io::Reader as ImageReader, DynamicImage};
 use std::fs::{self};
 use std::path::{Path, PathBuf};
@@ -47,7 +46,7 @@ impl Config {
 
                 let payload: Payload = match fs::read(&args[2]) {
                     Ok(bytes) => Payload::File(bytes),
-                    Err(_) => Payload::Literal(args[1].clone()),
+                    Err(_) => Payload::Literal(args[2].clone()),
                 };
 
                 Ok(Self {
@@ -69,8 +68,6 @@ impl Config {
     }
 
     pub fn run(self) -> Result<()> {
-        self.validate_config()?;
-
         match self.operaion {
             OperationType::Encode(payload) => {
                 let encoded = encode_image(&self.input_image, payload)?;
@@ -92,25 +89,6 @@ impl Config {
                 .unwrap_or(String::from("output.png")),
         )
     }
-
-    fn validate_config(&self) -> Result<()> {
-        match &self.operaion {
-            OperationType::Decode => Ok(()),
-            OperationType::Encode(payload) => {
-                // TODO return some recoverable error in case so the user can write the image in the 2 LSBs
-                if payload.size() * 8 + 8 > self.input_image_rgb_bytes() {
-                    Err(anyhow!("The payload is too big to be coded in the input image. Choose a bigger image (in resolution) or compress the payload."))
-                } else {
-                    Ok(())
-                }
-            }
-        }
-    }
-
-    fn input_image_rgb_bytes(&self) -> usize {
-        let (width, height) = self.input_image.dimensions();
-        width as usize * height as usize * 3
-    }
 }
 
 impl Payload {
@@ -131,24 +109,20 @@ impl Payload {
 
 fn read_image<P: AsRef<Path>>(path: P) -> Result<DynamicImage> {
     let path_ref = path.as_ref();
-    if !path_ref.exists() {
-        return Err(anyhow!("'{}' does not exist!", path_ref.display()));
-    }
 
-    match ImageReader::open(path_ref) {
+    match ImageReader::open(path.as_ref()) {
         Ok(reader) => match reader.decode() {
             Ok(image) => Ok(image),
-            Err(e) => {
-                dbg!(e);
-                Err(anyhow!(
-                    "File '{}' is not an image or has the wrong format.",
-                    path_ref.display()
-                ))
-            }
+            Err(e) => Err(anyhow!(
+                "File '{}' is not an image or has the wrong format: {}",
+                path_ref.display(),
+                e.to_string()
+            )),
         },
-        Err(e) => {
-            dbg!(e);
-            panic!("Should not happen, the file exists.");
-        }
+        Err(e) => Err(anyhow!(
+            "Error reading file '{}': {}",
+            path_ref.display(),
+            e.to_string()
+        )),
     }
 }

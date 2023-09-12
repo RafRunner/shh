@@ -23,21 +23,16 @@ pub fn encode_byte_in_bytes(target: &[u8; 8], payload: &u8) -> [u8; 8] {
     result
 }
 
-pub fn u64_to_u8_array(value: &u64) -> [u8; 8] {
-    let mut mask: u64 = 0x00000000000000FF;
-    let mut result: [u8; 8] = [0; 8];
+pub fn encode_image(input_image: &DynamicImage, payload: Payload) -> Result<DynamicImage> {
+    let payload_size = payload.size();
 
-    for i in 0..8 {
-        result[i] = ((value & mask) >> 8 * i) as u8;
-        mask <<= 8;
+    if payload_size * 8 + 8 > image_rgb_bytes_size(input_image) {
+        return Err(anyhow!(
+            "The payload is too big to be coded in the input image. Choose a bigger image (in resolution) or compress the payload."
+        ));
     }
 
-    result
-}
-
-pub fn encode_image(input_image: &DynamicImage, payload: Payload) -> Result<DynamicImage> {
-    let payload_size = payload.size() as u64;
-    let payload_size_bytes = u64_to_u8_array(&payload_size);
+    let payload_size_bytes = payload_size.to_le_bytes();
     let payload = payload.into_bytes();
 
     let (width, height) = input_image.dimensions();
@@ -66,6 +61,11 @@ pub fn encode_image(input_image: &DynamicImage, payload: Payload) -> Result<Dyna
 
 pub fn decode_image(image: &DynamicImage) -> Result<Vec<u8>> {
     let image_bytes = image.to_rgb8().into_raw();
+
+    if image_bytes.len() < 64 {
+        return Err(anyhow!("Input image is too small."));
+    }
+
     let chunks: Vec<[u8; 8]> = image_bytes
         .chunks_exact(8)
         .map(|chunk| chunk.try_into().expect("Impossible"))
@@ -98,6 +98,11 @@ pub fn decode_image(image: &DynamicImage) -> Result<Vec<u8>> {
     }
 
     Ok(decoded)
+}
+
+fn image_rgb_bytes_size(image: &DynamicImage) -> usize {
+    let (width, height) = image.dimensions();
+    width as usize * height as usize * 3
 }
 
 #[cfg(test)]
@@ -190,30 +195,38 @@ mod tests {
     }
 
     #[test]
-    fn u64_to_u8_test_all_zeros() {
-        let value: u64 = 0x0000000000000000;
-        let result = u64_to_u8_array(&value);
-        assert_eq!(result, [0, 0, 0, 0, 0, 0, 0, 0]);
+    fn encode_byte_payload_all_zeros() {
+        let target: [u8; 8] = [0b0101_0101; 8];
+        let payload: u8 = 0b0000_0000;
+        let encoded = encode_byte_in_bytes(&target, &payload);
+        assert_eq!(encoded, [0b0101_0100; 8]);
     }
 
     #[test]
-    fn u64_to_u8_test_all_ones() {
-        let value: u64 = 0xFFFFFFFFFFFFFFFF;
-        let result = u64_to_u8_array(&value);
-        assert_eq!(result, [255, 255, 255, 255, 255, 255, 255, 255]);
+    fn encode_byte_payload_all_ones() {
+        let target: [u8; 8] = [0b0101_0100; 8];
+        let payload: u8 = 0b1111_1111;
+        let encoded = encode_byte_in_bytes(&target, &payload);
+        assert_eq!(encoded, [0b0101_0101; 8]);
     }
 
     #[test]
-    fn u64_to_u8_test_alternating_bits() {
-        let value: u64 = 0xAA55AA55AA55AA55;
-        let result = u64_to_u8_array(&value);
-        assert_eq!(result, [85, 170, 85, 170, 85, 170, 85, 170]);
-    }
-
-    #[test]
-    fn u64_to_u8_test_random_value() {
-        let value: u64 = 0x123456789ABCDEF0;
-        let result = u64_to_u8_array(&value);
-        assert_eq!(result, [240, 222, 188, 154, 120, 86, 52, 18]);
+    fn encode_byte_payload_mixed() {
+        let target: [u8; 8] = [0b0101_0100; 8];
+        let payload: u8 = 0b1010_1010;
+        let encoded = encode_byte_in_bytes(&target, &payload);
+        assert_eq!(
+            encoded,
+            [
+                0b0101_0100,
+                0b0101_0101,
+                0b0101_0100,
+                0b0101_0101,
+                0b0101_0100,
+                0b0101_0101,
+                0b0101_0100,
+                0b0101_0101
+            ]
+        );
     }
 }
