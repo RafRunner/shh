@@ -97,9 +97,9 @@ fn encode_byte_in_bytes(target: &[u8; 8], payload: &u8) -> [u8; 8] {
         let current_bit = payload & mask;
 
         let encoded = if current_bit != 0 {
-            target[i] | 0b1000_0000
+            target[i] | 0b0000_0001
         } else {
-            target[i] & 0b0111_1111
+            target[i] & 0b1111_1110
         };
 
         result[i] = encoded;
