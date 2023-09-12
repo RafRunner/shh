@@ -32,7 +32,7 @@ pub fn encode_image(input_image: &DynamicImage, payload: Payload) -> Result<Dyna
         ));
     }
 
-    let payload_size_bytes = payload_size.to_le_bytes();
+    let payload_size_bytes: [u8; 8] = (payload_size as u64).to_le_bytes();
     let payload = payload.into_bytes();
 
     let (width, height) = input_image.dimensions();
@@ -72,13 +72,15 @@ pub fn decode_image(image: &DynamicImage) -> Result<Vec<u8>> {
         .collect();
 
     let mut decoded: Vec<u8> = Vec::new();
-    let mut payload_size: usize = 0;
+    let mut payload_size: u64 = 0;
 
     for i in 0..8 {
         for j in 0..8 {
-            payload_size |= (((chunks[i][j] & 0b0000_0001) << j) as usize) << i * 8;
+            payload_size |= (((chunks[i][j] & 0b0000_0001) << j) as u64) << i * 8;
         }
     }
+
+    let payload_size: usize = u64_to_usize(payload_size)?;
 
     if payload_size + 8 > chunks.len() {
         return Err(anyhow!(
@@ -103,6 +105,17 @@ pub fn decode_image(image: &DynamicImage) -> Result<Vec<u8>> {
 fn image_rgb_bytes_size(image: &DynamicImage) -> usize {
     let (width, height) = image.dimensions();
     width as usize * height as usize * 3
+}
+
+fn u64_to_usize(value: u64) -> Result<usize> {
+    if value <= usize::MAX as u64 {
+        Ok(value as usize)
+    } else {
+        Err(anyhow!(
+            "Payload size {} is too big for this platform",
+            value
+        ))
+    }
 }
 
 #[cfg(test)]
