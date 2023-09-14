@@ -160,9 +160,9 @@ mod tests {
             0b0100_1100,
             0b1000_1000,
         ];
-        let byte: u8 = 0b1110_1010;
+        let payload: u8 = 0b1110_1010;
 
-        let expected: [u8; 8] = [
+        let encoded: [u8; 8] = [
             0b1010_0000,
             0b1001_0111,
             0b0100_0100,
@@ -173,7 +173,8 @@ mod tests {
             0b1000_1001,
         ];
 
-        assert_eq!(expected, encode_byte_in_bytes(&target, &byte));
+        assert_eq!(encoded, encode_byte_in_bytes(&target, &payload));
+        assert_eq!(decode_byte(&encoded), payload);
     }
 
     #[test]
@@ -188,9 +189,9 @@ mod tests {
             0b0100_1101,
             0b1110_1001,
         ];
-        let byte: u8 = 0b0110_1000;
+        let payload: u8 = 0b0110_1000;
 
-        let expected: [u8; 8] = [
+        let encoded: [u8; 8] = [
             0b0110_0000,
             0b0111_0110,
             0b0000_0100,
@@ -201,7 +202,8 @@ mod tests {
             0b1110_1000,
         ];
 
-        assert_eq!(expected, encode_byte_in_bytes(&target, &byte));
+        assert_eq!(encoded, encode_byte_in_bytes(&target, &payload));
+        assert_eq!(decode_byte(&encoded), payload);
     }
 
     #[test]
@@ -216,9 +218,9 @@ mod tests {
             0b0100_1101,
             0b1000_1000,
         ];
-        let byte: u8 = 0b1100_1010;
+        let payload: u8 = 0b1100_1010;
 
-        let expected: [u8; 8] = [
+        let encoded: [u8; 8] = [
             0b0010_0000,
             0b0001_0111,
             0b0000_0100,
@@ -229,7 +231,8 @@ mod tests {
             0b1000_1001,
         ];
 
-        assert_eq!(expected, encode_byte_in_bytes(&target, &byte));
+        assert_eq!(encoded, encode_byte_in_bytes(&target, &payload));
+        assert_eq!(decode_byte(&encoded), payload);
     }
 
     #[test]
@@ -238,6 +241,7 @@ mod tests {
         let payload: u8 = 0b0000_0000;
         let encoded = encode_byte_in_bytes(&target, &payload);
         assert_eq!(encoded, [0b0101_0100; 8]);
+        assert_eq!(decode_byte(&encoded), payload);
     }
 
     #[test]
@@ -246,6 +250,7 @@ mod tests {
         let payload: u8 = 0b1111_1111;
         let encoded = encode_byte_in_bytes(&target, &payload);
         assert_eq!(encoded, [0b0101_0101; 8]);
+        assert_eq!(decode_byte(&encoded), payload);
     }
 
     #[test]
@@ -266,6 +271,7 @@ mod tests {
                 0b0101_0101
             ]
         );
+        assert_eq!(decode_byte(&encoded), payload);
     }
 
     #[test]
@@ -279,16 +285,19 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_byte() {
-        // Case 1: All zeroes
+    fn decode_byte_all_zeros() {
         let encoded: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
         assert_eq!(decode_byte(&encoded), 0);
+    }
 
-        // Case 2: All ones
+    #[test]
+    fn decode_byte_all_ones() {
         let encoded: [u8; 8] = [11, 19, 101, 17, 25, 1, 13, 1];
         assert_eq!(decode_byte(&encoded), 0b1111_1111);
+    }
 
-        // Case 3: Alternate zeroes and ones
+    #[test]
+    fn decode_byte_mixed() {
         let encoded: [u8; 8] = [8, 1, 12, 13, 78, 236, 116, 11];
         assert_eq!(decode_byte(&encoded), 0b1000_1010);
     }
