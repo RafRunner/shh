@@ -28,19 +28,19 @@ pub enum OperationType {
 
 impl Config {
     pub fn build(args: &[String]) -> Result<Self> {
-        if args.len() < 2 {
+        if args.is_empty() {
             return Err(anyhow!(
-                "usage: shh <operaion: encode or decode>:
-                    shh e <target image> <payload (file or string)> <output file (optional)>
-                    shh d <encoded image> <output file (optional)>",
+                "Too few arguments!\n{}",
+                Config::get_help_message()
             ));
         }
 
-        let input_image = read_image(&args[1])?;
+        let len = args.len();
 
         match &(*args[0]) {
-            "e" | "encode" => {
-                if args.len() < 3 {
+            "e" | "encode" if (3..=4).contains(&len) => {
+                let input_image = read_image(&args[1])?;
+                if len < 3 {
                     return Err(anyhow!("please provide a payload (file or string)",));
                 }
 
@@ -55,14 +55,18 @@ impl Config {
                     output_path: Self::get_output_path(args.get(3), ".png"),
                 })
             }
-            "d" | "decode" => Ok(Self {
-                input_image,
-                operaion: OperationType::Decode,
-                output_path: Self::get_output_path(args.get(2), ""),
-            }),
+            "d" | "decode" if (2..=3).contains(&len) => {
+                let input_image = read_image(&args[1])?;
+                Ok(Self {
+                    input_image,
+                    operaion: OperationType::Decode,
+                    output_path: Self::get_output_path(args.get(2), ""),
+                })
+            }
+            "h" | "help" => Err(anyhow!(Config::get_help_message())),
             _ => Err(anyhow!(
-                "{} is not a valid operation. use d|decode or e|encode",
-                args[0]
+                "Wrong usage. Help:\n{}",
+                Config::get_help_message()
             )),
         }
     }
@@ -88,6 +92,31 @@ impl Config {
                 .map(|path| path.to_owned() + postfix)
                 .unwrap_or_else(|| String::from("output.png")),
         )
+    }
+
+    fn get_help_message() -> String {
+        // Define the operations and their descriptions
+        let operations = vec![
+            ("shh e <target image> <payload (file or string)> <output file name, default is output.png, is always a png>", "encode payload in image"),
+            ("shh d <encoded image> <output file name, default is output.png>", "try to decode a payload from the image"),
+            ("shh h", "show this message"),
+        ];
+
+        // Find the maximum length for aligning the descriptions
+        let max_length: usize = operations
+            .iter()
+            .map(|(operation, _)| operation.len())
+            .max()
+            .unwrap();
+
+        // Create the aligned help message
+        let mut help_message = String::from("usage: shh <operation: encode or decode>:\n");
+        for (operation, description) in operations {
+            let padding = " ".repeat(max_length - operation.len() + 1);
+            help_message.push_str(&format!("\t{}{}({})\n", operation, padding, description));
+        }
+
+        help_message
     }
 }
 
