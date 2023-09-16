@@ -1,6 +1,7 @@
 use crate::encode_decode::{decode_image, encode_image};
 use image::{io::Reader as ImageReader, DynamicImage};
 use std::fs::{self};
+use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
@@ -9,9 +10,7 @@ pub mod encode_decode;
 
 #[derive(Debug)]
 pub struct Config {
-    input_image: DynamicImage,
-    operaion: OperationType,
-    output_path: PathBuf,
+    operation: Operation,
 }
 
 #[derive(Debug)]
@@ -21,9 +20,17 @@ pub enum Payload {
 }
 
 #[derive(Debug)]
+pub enum Operation {
+    Encode(DynamicImage, Payload, PathBuf),
+    Decode(DynamicImage, PathBuf),
+    Help,
+}
+
+#[derive(Debug)]
 pub enum OperationType {
-    Encode(Payload),
+    Encode,
     Decode,
+    Help,
 }
 
 impl Config {
@@ -35,58 +42,106 @@ impl Config {
             ));
         }
 
-        let len = args.len();
+        let operation_type = OperationType::build(&args[0])?;
+        let args = &args[1..];
 
-        match &(*args[0]) {
-            "e" | "encode" if (3..=4).contains(&len) => {
-                let input_image = read_image(&args[1])?;
-                if len < 3 {
-                    return Err(anyhow!("please provide a payload (file or string)",));
-                }
+        let range = operation_type.get_args_range();
+        if !range.contains(&args.len()) {
+            return Err(anyhow!(
+                "Wrong number of arguments for operation {:?}! Expected a minimum of {} and maximum of {} args",
+                operation_type,
+                range.start(),
+                range.end()
+            ));
+        }
 
-                let payload: Payload = match fs::read(&args[2]) {
+        let operation = match operation_type {
+            OperationType::Encode => {
+                let input_image = read_image(&args[0])?;
+
+                let payload: Payload = match fs::read(&args[1]) {
                     Ok(bytes) => Payload::File(bytes),
-                    Err(_) => Payload::Literal(args[2].clone()),
+                    Err(_) => Payload::Literal(args[1].clone()),
                 };
 
-                Ok(Self {
+                Operation::Encode(
                     input_image,
-                    operaion: OperationType::Encode(payload),
-                    output_path: Self::get_output_path(args.get(3), ".png"),
-                })
+                    payload,
+                    operation_type.get_output_path(args.get(2)),
+                )
             }
-            "d" | "decode" if (2..=3).contains(&len) => {
-                let input_image = read_image(&args[1])?;
-                Ok(Self {
+            OperationType::Decode => {
+                let input_image = read_image(&args[0])?;
+                Operation::Decode(
                     input_image,
-                    operaion: OperationType::Decode,
-                    output_path: Self::get_output_path(args.get(2), ""),
-                })
+                    operation_type.get_output_path(args.get(1)),
+                )
             }
-            "h" | "help" => Err(anyhow!(Config::get_help_message())),
-            _ => Err(anyhow!(
-                "Wrong usage. Help:\n{}",
-                Config::get_help_message()
-            )),
-        }
+            OperationType::Help => Operation::Help,
+        };
+
+        Ok(Self { operation })
     }
 
     pub fn run(self) -> Result<()> {
-        match self.operaion {
-            OperationType::Encode(payload) => {
-                let encoded = encode_image(&self.input_image, payload)?;
-                encoded.save(self.output_path)?;
+        match self.operation {
+            Operation::Encode(input_image, payload, output_path) => {
+                let encoded = encode_image(&input_image, payload)?;
+                encoded.save(output_path)?;
             }
-            OperationType::Decode => {
-                let decoded = decode_image(&self.input_image)?;
-                fs::write(self.output_path, decoded)?;
+            Operation::Decode(input_image, output_path) => {
+                let decoded = decode_image(&input_image)?;
+                fs::write(output_path, decoded)?;
             }
+            Operation::Help => println!("{}", Self::get_help_message()),
         };
 
         Ok(())
     }
 
-    fn get_output_path(provided: Option<&String>, postfix: &str) -> PathBuf {
+    fn get_help_message() -> String {
+        // Define the operations
+        let operations = vec![
+            OperationType::Encode,
+            OperationType::Decode,
+            OperationType::Help,
+        ];
+
+        // Find the maximum length for aligning the descriptions
+        let max_length: usize = operations
+            .iter()
+            .map(|operation| operation.get_help().0.len())
+            .max()
+            .unwrap();
+
+        // Create the aligned help message
+        let mut help_message = String::from("usage: shh <operation: encode or decode>:\n");
+        for (operation, description) in operations.iter().map(|it| it.get_help()) {
+            let padding = " ".repeat(max_length - operation.len() + 1);
+            help_message.push_str(&format!("\t{}{}({})\n", operation, padding, description));
+        }
+
+        help_message
+    }
+}
+
+impl OperationType {
+    fn build(command_name: &str) -> Result<Self> {
+        match command_name {
+            "e" | "encode" => Ok(Self::Encode),
+            "d" | "decode" => Ok(Self::Decode),
+            "h" | "help" => Ok(Self::Help),
+            _ => Err(anyhow!("Operation {} does not exist!", command_name)),
+        }
+    }
+
+    fn get_output_path(&self, provided: Option<&String>) -> PathBuf {
+        let postfix = if let Self::Encode = self {
+            ".png"
+        } else {
+            ""
+        };
+
         PathBuf::from(
             provided
                 .map(|path| path.to_owned() + postfix)
@@ -94,29 +149,20 @@ impl Config {
         )
     }
 
-    fn get_help_message() -> String {
-        // Define the operations and their descriptions
-        let operations = vec![
-            ("shh e <target image> <payload (file or string)> <output file name, default is output.png, is always a png>", "encode payload in image"),
-            ("shh d <encoded image> <output file name, default is output.png>", "try to decode a payload from the image"),
-            ("shh h", "show this message"),
-        ];
-
-        // Find the maximum length for aligning the descriptions
-        let max_length: usize = operations
-            .iter()
-            .map(|(operation, _)| operation.len())
-            .max()
-            .unwrap();
-
-        // Create the aligned help message
-        let mut help_message = String::from("usage: shh <operation: encode or decode>:\n");
-        for (operation, description) in operations {
-            let padding = " ".repeat(max_length - operation.len() + 1);
-            help_message.push_str(&format!("\t{}{}({})\n", operation, padding, description));
+    fn get_help(&self) -> (&'static str, &'static str) {
+        match self {
+            OperationType::Encode => ("shh e <target image> <payload (file or string)> <output file name, default is output.png, is always a png>", "encode payload in image"),
+            OperationType::Decode => ("shh d <encoded image> <output file name, default is output.png>", "try to decode a payload from the image"),
+            OperationType::Help => ("shh h", "show this message")
         }
+    }
 
-        help_message
+    fn get_args_range(&self) -> RangeInclusive<usize> {
+        match self {
+            OperationType::Encode => 2..=3,
+            OperationType::Decode => 1..=2,
+            OperationType::Help => 0..=usize::MAX,
+        }
     }
 }
 
