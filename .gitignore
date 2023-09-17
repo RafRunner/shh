@@ -1,6 +1,6 @@
-/target
+/target/
 /Cargo.lock
+/.idea/
 /*.png
 /*.jpeg
 /*.jpg
-

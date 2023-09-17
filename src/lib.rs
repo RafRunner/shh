@@ -5,6 +5,8 @@ use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
+use strum::IntoEnumIterator;
+use strum_macros::{EnumDiscriminants, EnumIter};
 
 pub mod encode_decode;
 
@@ -19,17 +21,12 @@ pub enum Payload {
     Literal(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, EnumDiscriminants)]
+#[strum_discriminants(derive(EnumIter))]
+#[strum_discriminants(name(OperationType))]
 pub enum Operation {
     Encode(DynamicImage, Payload, PathBuf),
     Decode(DynamicImage, PathBuf),
-    Help,
-}
-
-#[derive(Debug)]
-pub enum OperationType {
-    Encode,
-    Decode,
     Help,
 }
 
@@ -70,16 +67,8 @@ impl Config {
     }
 
     fn get_help_message() -> String {
-        // Define the operations
-        let operations = vec![
-            OperationType::Encode,
-            OperationType::Decode,
-            OperationType::Help,
-        ];
-
         // Find the maximum length for aligning the descriptions
-        let max_length: usize = operations
-            .iter()
+        let max_length: usize = OperationType::iter()
             .map(|operation| operation.get_help().0.len())
             .max()
             .unwrap();
@@ -87,7 +76,7 @@ impl Config {
         // Create the aligned help message
         let mut help_message =
             String::from("Shh: simple Rust steganography.\nUsage: shh <operation>:\n");
-        for (operation, description) in operations.iter().map(|it| it.get_help()) {
+        for (operation, description) in OperationType::iter().map(|it| it.get_help()) {
             let padding = " ".repeat(max_length - operation.len() + 1);
             help_message.push_str(&format!("\t{}{}({})\n", operation, padding, description));
         }
@@ -150,17 +139,17 @@ impl OperationType {
 
     fn get_help(&self) -> (&'static str, &'static str) {
         match self {
-            OperationType::Encode => ("shh e <target image> <payload (file or string)> <output file name, default is output.png, is always a png>", "encode payload in image"),
-            OperationType::Decode => ("shh d <encoded image> <output file name, default is output.png>", "try to decode a payload from the image"),
-            OperationType::Help => ("shh h", "show this message")
+            Self::Encode => ("shh e <target image> <payload (file or string)> <output file name, default is output.png, is always a png>", "encode payload in image"),
+            Self::Decode => ("shh d <encoded image> <output file name, default is output.png>", "try to decode a payload from the image"),
+            Self::Help => ("shh h", "show this message")
         }
     }
 
     fn get_args_range(&self) -> RangeInclusive<usize> {
         match self {
-            OperationType::Encode => 2..=3,
-            OperationType::Decode => 1..=2,
-            OperationType::Help => 0..=usize::MAX,
+            Self::Encode => 2..=3,
+            Self::Decode => 1..=2,
+            Self::Help => 0..=usize::MAX,
         }
     }
 }
