@@ -85,7 +85,8 @@ impl Config {
             .unwrap();
 
         // Create the aligned help message
-        let mut help_message = String::from("usage: shh <operation: encode or decode>:\n");
+        let mut help_message =
+            String::from("Shh: simple Rust steganography.\nUsage: shh <operation>:\n");
         for (operation, description) in operations.iter().map(|it| it.get_help()) {
             let padding = " ".repeat(max_length - operation.len() + 1);
             help_message.push_str(&format!("\t{}{}({})\n", operation, padding, description));
