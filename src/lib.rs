@@ -35,50 +35,20 @@ pub enum OperationType {
 
 impl Config {
     pub fn build(args: &[String]) -> Result<Self> {
+        match Self::build_raw_error(args) {
+            Ok(config) => Ok(config),
+            Err(error) => Err(anyhow!("{}\nUse 'shh h' to see program usage", error)),
+        }
+    }
+
+    fn build_raw_error(args: &[String]) -> Result<Self> {
         if args.is_empty() {
-            return Err(anyhow!(
-                "Too few arguments!\n{}",
-                Config::get_help_message()
-            ));
+            return Err(anyhow!("Too few arguments!",));
         }
 
         let operation_type = OperationType::build(&args[0])?;
         let args = &args[1..];
-
-        let range = operation_type.get_args_range();
-        if !range.contains(&args.len()) {
-            return Err(anyhow!(
-                "Wrong number of arguments for operation {:?}! Expected a minimum of {} and maximum of {} args",
-                operation_type,
-                range.start(),
-                range.end()
-            ));
-        }
-
-        let operation = match operation_type {
-            OperationType::Encode => {
-                let input_image = read_image(&args[0])?;
-
-                let payload: Payload = match fs::read(&args[1]) {
-                    Ok(bytes) => Payload::File(bytes),
-                    Err(_) => Payload::Literal(args[1].clone()),
-                };
-
-                Operation::Encode(
-                    input_image,
-                    payload,
-                    operation_type.get_output_path(args.get(2)),
-                )
-            }
-            OperationType::Decode => {
-                let input_image = read_image(&args[0])?;
-                Operation::Decode(
-                    input_image,
-                    operation_type.get_output_path(args.get(1)),
-                )
-            }
-            OperationType::Help => Operation::Help,
-        };
+        let operation = operation_type.build_operation(args)?;
 
         Ok(Self { operation })
     }
@@ -135,12 +105,40 @@ impl OperationType {
         }
     }
 
-    fn get_output_path(&self, provided: Option<&String>) -> PathBuf {
-        let postfix = if let Self::Encode = self {
-            ".png"
-        } else {
-            ""
+    fn build_operation(&self, args: &[String]) -> Result<Operation> {
+        let range = self.get_args_range();
+        if !range.contains(&args.len()) {
+            return Err(anyhow!(
+                "Wrong number of arguments for operation {:?}! Expected a minimum of {} and maximum of {} args",
+                self,
+                range.start(),
+                range.end()
+            ));
+        }
+
+        let operation = match self {
+            Self::Encode => {
+                let input_image = read_image(&args[0])?;
+
+                let payload: Payload = match fs::read(&args[1]) {
+                    Ok(bytes) => Payload::File(bytes),
+                    Err(_) => Payload::Literal(args[1].clone()),
+                };
+
+                Operation::Encode(input_image, payload, self.get_output_path(args.get(2)))
+            }
+            Self::Decode => {
+                let input_image = read_image(&args[0])?;
+                Operation::Decode(input_image, self.get_output_path(args.get(1)))
+            }
+            Self::Help => Operation::Help,
         };
+
+        Ok(operation)
+    }
+
+    fn get_output_path(&self, provided: Option<&String>) -> PathBuf {
+        let postfix = if let Self::Encode = self { ".png" } else { "" };
 
         PathBuf::from(
             provided
@@ -191,13 +189,13 @@ fn read_image<P: AsRef<Path>>(path: P) -> Result<DynamicImage> {
             Err(e) => Err(anyhow!(
                 "File '{}' is not an image or has the wrong format: {}",
                 path_ref.display(),
-                e.to_string()
+                e
             )),
         },
         Err(e) => Err(anyhow!(
             "Error reading file '{}': {}",
             path_ref.display(),
-            e.to_string()
+            e
         )),
     }
 }
