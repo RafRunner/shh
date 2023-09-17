@@ -130,7 +130,7 @@ fn create_byte_chunks(image_bytes: &[u8]) -> impl Iterator<Item = &[u8; 8]> {
 fn payload_fits(payload_size: usize, image_rgb_size: usize) -> bool {
     payload_size
         .checked_mul(8)
-        .and_then(|it| it.checked_add(8))
+        .and_then(|it| it.checked_add(64))
         .map(|it| it <= image_rgb_size)
         .unwrap_or(false)
 }
@@ -276,12 +276,13 @@ mod tests {
 
     #[test]
     fn test_payload_fits() {
-        assert!(payload_fits(1, 16));
+        assert!(payload_fits(1, 72));
         assert!(payload_fits(100, 1000000));
-        assert!(payload_fits(1000, 8009));
-        assert!(!payload_fits(1000, 8007));
+        assert!(payload_fits(1000, 8065));
+        assert!(!payload_fits(1000, 8063));
         assert!(!payload_fits(usize::MAX, usize::MAX));
-        assert!(!payload_fits(usize::MAX - 10, usize::MAX));
+        assert!(payload_fits(usize::MAX / 8 - 9, usize::MAX));
+        assert!(!payload_fits(usize::MAX / 8 - 7, usize::MAX));
     }
 
     #[test]
