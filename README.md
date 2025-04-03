@@ -1,20 +1,114 @@
-# Shh
+# Shh 🤫
 
-Shh is a simple Command Line Interface (CLI) for steganography, written in Rust.
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-This program allows you to hide a payload, either a text(string) or a file, within any image, as long as there's enough room. The payload is read as a vector of bytes, and if the payload is a file, it is read directly from the disk as is, without any abstraction or interpretation. Subsequently, this payload is encoded, bit by bit, into the least significant bits of the RGB channels of the input image. The first 64 bytes of the image also store the length of the payload, following little-endian order.
+A simple and lightweight Command Line Interface (CLI) for steganography, written in Rust.
 
-The encoded image is saved to disk in .png format, chosen for its lossless yet compressed nature. To determine whether a payload will fit into a specific image, you should calculate whether `(number of pixels in the image * 3) / 8 + 64` is smaller than the size of the payload in bytes. This approach allows you to hide an image of similar resolution inside another, provided the payload image is compressed enough.
+## What is Steganography?
 
-The program is also capable of decoding images that were encoded following these same rules. Make sure to provide an output file name with the correct original extension, as the extension is not stored or determined; this is an aspect that could be improved in the future.
+Steganography is the practice of concealing messages or information within other non-secret data or a physical object. Shh uses this technique to hide data within images without visible alterations.
 
-## Usage:
+## Features
 
-### To encode a payload into an image:
-    shh e <target image> <payload> <output file name, default is output.pnn>
+- Hide text messages or entire files within images
+- Extract hidden data from previously encoded images
+- No visible alteration to carrier images
+- Lossless encoding using PNG format
+- Simple and intuitive command-line interface
 
-### To decode a payload from an image:
-    shh d <encoded image> <output file name, default is output.png>
+## How It Works
 
-### To see a simple help message:
-    shh help
+Shh encodes data by manipulating the least significant bits of the RGB channels in each pixel of an image. The process works as follows:
+
+1. The payload (text or file) is read as a vector of bytes
+2. The first 64 bytes of the image store the payload length in little-endian order
+3. The remaining payload is encoded bit by bit into the least significant bits of each pixel's RGB channels
+4. The resulting image is saved in PNG format (lossless compression)
+
+## Installation
+
+### From Source
+
+```bash
+# Clone the repository
+git clone https://github.com/RafRunner/shh
+cd shh
+
+# Build with Cargo
+cargo build --release
+
+# Optional: Move the binary to your PATH
+cp target/release/shh ~/.local/bin/
+```
+
+## Usage
+
+### Encoding Data
+
+Hide a payload (text or file) within an image:
+
+```bash
+shh e <target_image> <payload> [output_filename]
+```
+
+Example:
+```bash
+# Hide a text message
+shh e original.jpg "This is a secret message" hidden.png
+
+# Hide a file
+shh e original.jpg secret.zip hidden.png
+```
+
+### Decoding Data
+
+Extract hidden data from an encoded image:
+
+```bash
+shh d <encoded_image> [output_filename]
+```
+
+Example:
+```bash
+# Extract to default filename (decoded.png)
+shh d hidden.png
+
+# Extract with custom filename
+shh d hidden.png extracted.zip
+```
+
+### Help
+
+Display help information:
+
+```bash
+shh help
+```
+
+## Payload Size Calculation
+
+To determine if your payload will fit into a specific image, use this formula:
+
+$
+\text{Maximum payload size (bytes)} = \frac{\text{width} \times \text{height} \times 3}{8} - 8
+$
+
+For example, a Full HD image (1920 x 1080 pixels) can store approximately:
+
+$
+\text{Maximum payload size (bytes)} = \frac{1920 \times 1080 \times 3}{8} - 8 = 777,592 \, \text{bytes} \approx 759 \, \text{KB}
+$
+
+## Limitations
+
+- The output format is always PNG (to preserve the hidden data)
+- File extensions for extracted data must be specified manually
+- Very large payloads require correspondingly large carrier images
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
