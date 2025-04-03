@@ -1,14 +1,47 @@
 use crate::encode_decode::{decode_image, encode_image};
+use anyhow::{anyhow, Result};
+use clap::{Parser, Subcommand};
 use image::{io::Reader as ImageReader, DynamicImage};
 use std::fs::{self};
-use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
-use strum::IntoEnumIterator;
-use strum_macros::{EnumDiscriminants, EnumIter};
-
 pub mod encode_decode;
+
+#[derive(Parser)]
+#[command(author, version, about = "Shh: simple Rust steganography")]
+pub struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+pub enum Commands {
+    /// Encode payload in image
+    #[command(visible_alias = "e")]
+    Encode {
+        /// Target image to encode the payload into
+        target_image: String,
+
+        /// Payload (file or string) to hide in the image
+        payload: String,
+
+        /// Output file name (always saved as PNG)
+        #[arg(default_value = "encoded.png")]
+        output: String,
+    },
+
+    /// Decode payload from an image. The original file extension is not preserved, you need to
+    /// specify it manually
+    #[command(visible_alias = "d")]
+    Decode {
+        /// Encoded image to extract the payload from
+        encoded_image: String,
+
+        /// Output file name for the extracted payload
+        #[arg(default_value = "decoded.png")]
+        output: String,
+    },
+}
 
 #[derive(Debug)]
 pub struct Config {
@@ -21,31 +54,52 @@ pub enum Payload {
     Literal(String),
 }
 
-#[derive(Debug, EnumDiscriminants)]
-#[strum_discriminants(derive(EnumIter))]
-#[strum_discriminants(name(OperationType))]
+#[derive(Debug)]
 pub enum Operation {
     Encode(DynamicImage, Payload, PathBuf),
     Decode(DynamicImage, PathBuf),
-    Help,
 }
 
 impl Config {
-    pub fn build(args: &[String]) -> Result<Self> {
-        match Self::build_raw_error(args) {
-            Ok(config) => Ok(config),
-            Err(error) => Err(anyhow!("{}\nUse 'shh h' to see program usage", error)),
-        }
+    pub fn build_from_args() -> Result<Self> {
+        let cli = Cli::parse();
+        Self::build_from_cli(cli)
     }
 
-    fn build_raw_error(args: &[String]) -> Result<Self> {
-        if args.is_empty() {
-            return Err(anyhow!("Too few arguments!",));
-        }
+    fn build_from_cli(cli: Cli) -> Result<Self> {
+        let operation = match cli.command {
+            Commands::Encode {
+                target_image,
+                payload,
+                output,
+            } => {
+                let input_image = read_image(&target_image)?;
 
-        let operation_type = OperationType::build(&args[0])?;
-        let args = &args[1..];
-        let operation = operation_type.build_operation(args)?;
+                let payload_data = match fs::read(&payload) {
+                    Ok(bytes) => Payload::File(bytes),
+                    Err(_) => Payload::Literal(payload),
+                };
+
+                let output_path = PathBuf::from(format!(
+                    "{}{}",
+                    output,
+                    if !output.ends_with(".png") {
+                        ".png"
+                    } else {
+                        ""
+                    }
+                ));
+                Operation::Encode(input_image, payload_data, output_path)
+            }
+            Commands::Decode {
+                encoded_image,
+                output,
+            } => {
+                let input_image = read_image(&encoded_image)?;
+                let output_path = PathBuf::from(output);
+                Operation::Decode(input_image, output_path)
+            }
+        };
 
         Ok(Self { operation })
     }
@@ -60,97 +114,9 @@ impl Config {
                 let decoded = decode_image(&input_image)?;
                 fs::write(output_path, decoded)?;
             }
-            Operation::Help => println!("{}", Self::get_help_message()),
         };
 
         Ok(())
-    }
-
-    fn get_help_message() -> String {
-        // Find the maximum length for aligning the descriptions
-        let max_length: usize = OperationType::iter()
-            .map(|operation| operation.get_help().0.len())
-            .max()
-            .unwrap();
-
-        // Create the aligned help message
-        let mut help_message =
-            String::from("Shh: simple Rust steganography.\nUsage: shh <operation>:\n");
-        for (operation, description) in OperationType::iter().map(|it| it.get_help()) {
-            let padding = " ".repeat(max_length - operation.len() + 1);
-            help_message.push_str(&format!("\t{}{}({})\n", operation, padding, description));
-        }
-
-        help_message
-    }
-}
-
-impl OperationType {
-    fn build(command_name: &str) -> Result<Self> {
-        match command_name {
-            "e" | "encode" => Ok(Self::Encode),
-            "d" | "decode" => Ok(Self::Decode),
-            "h" | "help" => Ok(Self::Help),
-            _ => Err(anyhow!("Operation {} does not exist!", command_name)),
-        }
-    }
-
-    fn build_operation(&self, args: &[String]) -> Result<Operation> {
-        let range = self.get_args_range();
-        if !range.contains(&args.len()) {
-            return Err(anyhow!(
-                "Wrong number of arguments for operation {:?}! Expected a minimum of {} and maximum of {} args",
-                self,
-                range.start(),
-                range.end()
-            ));
-        }
-
-        let operation = match self {
-            Self::Encode => {
-                let input_image = read_image(&args[0])?;
-
-                let payload: Payload = match fs::read(&args[1]) {
-                    Ok(bytes) => Payload::File(bytes),
-                    Err(_) => Payload::Literal(args[1].clone()),
-                };
-
-                Operation::Encode(input_image, payload, self.get_output_path(args.get(2)))
-            }
-            Self::Decode => {
-                let input_image = read_image(&args[0])?;
-                Operation::Decode(input_image, self.get_output_path(args.get(1)))
-            }
-            Self::Help => Operation::Help,
-        };
-
-        Ok(operation)
-    }
-
-    fn get_output_path(&self, provided: Option<&String>) -> PathBuf {
-        let postfix = if let Self::Encode = self { ".png" } else { "" };
-
-        PathBuf::from(
-            provided
-                .map(|path| path.to_owned() + postfix)
-                .unwrap_or_else(|| String::from("output.png")),
-        )
-    }
-
-    fn get_help(&self) -> (&'static str, &'static str) {
-        match self {
-            Self::Encode => ("shh e <target image> <payload (file or string)> <output file name, default is output.png, is always a png>", "encode payload in image"),
-            Self::Decode => ("shh d <encoded image> <output file name, default is output.png>", "try to decode a payload from the image"),
-            Self::Help => ("shh h", "show this message")
-        }
-    }
-
-    fn get_args_range(&self) -> RangeInclusive<usize> {
-        match self {
-            Self::Encode => 2..=3,
-            Self::Decode => 1..=2,
-            Self::Help => 0..=usize::MAX,
-        }
     }
 }
 
