@@ -12,16 +12,14 @@ pub fn encode_image(input_image: &DynamicImage, payload: Payload) -> Result<Dyna
         ));
     }
 
-    let payload_size_bytes: [u8; 8] = (payload_size as u64).to_le_bytes();
-    let payload = payload.into_bytes();
+    let payload_bytes = payload.into_bytes()?;
 
     let (width, height) = input_image.dimensions();
     let image_bytes = input_image.to_rgb8().into_raw();
-    let chunks = create_byte_chunks(&image_bytes).take(payload.len() + 8);
+    let chunks = create_byte_chunks(&image_bytes).take(payload_size);
 
-    let mut output: Vec<u8> = payload_size_bytes
+    let mut output: Vec<u8> = payload_bytes
         .iter()
-        .chain(payload.iter())
         .zip(chunks)
         .flat_map(|(payload, chunk)| encode_byte_in_bytes(chunk, payload))
         .collect();
@@ -38,11 +36,30 @@ pub fn encode_image(input_image: &DynamicImage, payload: Payload) -> Result<Dyna
     Ok(DynamicImage::ImageRgb8(image_buffer))
 }
 
-pub fn decode_image(image: &DynamicImage) -> Result<Vec<u8>> {
-    check_minimum_image_size(image)?;
+pub fn decode_image(image: &DynamicImage) -> Result<(String, Vec<u8>)> {
     let image_bytes = image.to_rgb8().into_raw();
 
     let mut chunks = create_byte_chunks(&image_bytes);
+
+    let file_name_size: u16 = u16::from_le_bytes(
+        <[u8; 2]>::try_from(
+            chunks
+                .by_ref()
+                .take(2)
+                .map(decode_byte)
+                .collect::<Vec<u8>>(),
+        )
+        .map_err(|_| anyhow!("This image probably wasn't encoded. It's too small to contain the encoded file name"))?,
+    );
+
+    let file_name = String::from_utf8(
+        chunks
+            .by_ref()
+            .take(file_name_size as usize)
+            .map(decode_byte)
+            .collect::<Vec<u8>>(),
+    )
+    .map_err(|_| anyhow!("This image probably wasn't encoded. The file name is not valid UTF-8"))?;
 
     let payload_size: u64 = u64::from_le_bytes(
         <[u8; 8]>::try_from(
@@ -52,24 +69,25 @@ pub fn decode_image(image: &DynamicImage) -> Result<Vec<u8>> {
                 .map(decode_byte)
                 .collect::<Vec<u8>>(),
         )
-        .unwrap(),
+        .map_err(|_| anyhow!("This image probably wasn't encoded. It's too small to contain the encoded payload size"))?,
     );
 
     let payload_size: usize = u64_to_usize(payload_size)?;
+    let payload_chunks = chunks.take(payload_size).collect::<Vec<&[u8; 8]>>();
 
-    if !payload_fits(payload_size, image_bytes.len()) {
+    if payload_chunks.len() < payload_size {
         return Err(anyhow!(
-            "This image probably wasn't encoded. The encoded length is bigger then expected"
+            "This image probably wasn't encoded. The encoded length is smaller then expected"
         ));
     }
 
     let mut decoded: Vec<u8> = Vec::with_capacity(payload_size);
 
-    for chunk in chunks.take(payload_size) {
+    for chunk in payload_chunks {
         decoded.push(decode_byte(chunk));
     }
 
-    Ok(decoded)
+    Ok((file_name, decoded))
 }
 
 fn image_rgb_bytes_size(image: &DynamicImage) -> usize {
@@ -130,17 +148,8 @@ fn create_byte_chunks(image_bytes: &[u8]) -> impl Iterator<Item = &[u8; 8]> {
 fn payload_fits(payload_size: usize, image_rgb_size: usize) -> bool {
     payload_size
         .checked_mul(8)
-        .and_then(|it| it.checked_add(64))
         .map(|it| it <= image_rgb_size)
         .unwrap_or(false)
-}
-
-fn check_minimum_image_size(image: &DynamicImage) -> Result<()> {
-    if image_rgb_bytes_size(image) < 64 {
-        Err(anyhow!("Input image is too small."))
-    } else {
-        Ok(())
-    }
 }
 
 #[cfg(test)]
