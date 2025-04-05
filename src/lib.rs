@@ -95,15 +95,11 @@ impl Config {
                     Err(_) => Payload::Literal(payload),
                 };
 
-                let output_path = PathBuf::from(format!(
-                    "{}{}",
-                    output,
-                    if !output.ends_with(".png") {
-                        ".png"
-                    } else {
-                        ""
-                    }
-                ));
+                let output_path = PathBuf::from(if output.ends_with(".png") {
+                    output
+                } else {
+                    output + ".png"
+                });
                 Operation::Encode {
                     target_image: input_image,
                     payload: payload_data,
@@ -147,7 +143,7 @@ impl Config {
                         .extension()
                         .and_then(|ext| ext.to_str())
                         .map(|ext| format!(".{}", ext))
-                        .unwrap_or(".txt".to_string());
+                        .unwrap_or("".to_string());
 
                     format!("{}{}", output_path.display(), original_ext)
                 } else {
@@ -163,45 +159,29 @@ impl Config {
 }
 
 impl Payload {
+    /// Extra 2 bytes for file name length, 8 bytes for payload size
     fn size(&self) -> usize {
         match self {
-            Payload::File { bytes, file_name } => bytes.len() + 8 + file_name.len() + 2,
-            Payload::Literal(string) => string.len() + 8 + "output.txt".len() + 2,
+            Payload::File { bytes, file_name } => 2 + file_name.len() + 8 + bytes.len(),
+            Payload::Literal(string) => 2 + "output.txt".len() + 8 + string.len(),
         }
     }
 
     fn into_bytes(self) -> Result<Vec<u8>> {
-        match self {
-            Payload::File { bytes, file_name } => {
-                let name_len = file_name.len();
-                if name_len > u16::MAX as usize {
-                    return Err(anyhow!("File name is too long to be encoded"));
-                }
+        let (bytes, file_name) = match self {
+            Payload::File { bytes, file_name } => (bytes, file_name),
+            Payload::Literal(string) => (string.into_bytes(), "output.txt".to_string()),
+        };
 
-                let name_len = (name_len as u16).to_le_bytes();
-                let file_name = file_name.bytes();
-                let bytes_len = (bytes.len() as u64).to_le_bytes();
+        let name_len = (file_name.len() as u16).to_le_bytes();
+        let bytes_len = (bytes.len() as u64).to_le_bytes();
 
-                Ok(name_len
-                    .into_iter()
-                    .chain(file_name)
-                    .chain(bytes_len)
-                    .chain(bytes)
-                    .collect::<Vec<u8>>())
-            }
-            Payload::Literal(string) => {
-                let name_len = ("output.txt".len() as u16).to_le_bytes();
-                let file_name = "output.txt".bytes();
-                let bytes_len = (string.len() as u64).to_le_bytes();
-
-                Ok(name_len
-                    .into_iter()
-                    .chain(file_name)
-                    .chain(bytes_len)
-                    .chain(string.into_bytes())
-                    .collect::<Vec<u8>>())
-            }
-        }
+        Ok(name_len
+            .into_iter()
+            .chain(file_name.into_bytes())
+            .chain(bytes_len)
+            .chain(bytes)
+            .collect::<Vec<u8>>())
     }
 }
 
