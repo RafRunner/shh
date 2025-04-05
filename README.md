@@ -108,7 +108,7 @@ $
 \text{Maximum payload size (bytes)} = \frac{1920 \times 1080 \times 3}{8} = 777,560 \, \text{bytes} \approx 759 \, \text{KB}
 $
 
-These are approximations, as the original file name and lenghts have to be encoded, but serves as a good estimative.
+These are approximations, as the original file name and lengths have to be encoded, but serves as a good estimate.
 
 ## Limitations
 
