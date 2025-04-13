@@ -85,12 +85,10 @@ impl Config {
                         let file_name = Path::new(&payload)
                             .file_name()
                             .unwrap() // We can safely unwrap here because we already could read the file
-                            .to_string_lossy();
+                            .to_string_lossy()
+                            .to_string();
 
-                        Payload::File {
-                            file_name: file_name.to_string(),
-                            bytes,
-                        }
+                        Payload::File { file_name, bytes }
                     }
                     Err(_) => Payload::Literal(payload),
                 };
@@ -130,7 +128,8 @@ impl Config {
                 output_path,
             } => {
                 let encoded = encode_image(&target_image, payload)?;
-                encoded.save(output_path)?;
+                encoded.save(&output_path)?;
+                println!("Encoded image saved to '{}'", output_path.display());
             }
             Operation::Decode {
                 encoded_image,
@@ -138,11 +137,10 @@ impl Config {
             } => {
                 let (original_name, decoded) = decode_image(&encoded_image)?;
 
-                let output_path = if let Some(output_path) = output_path {
+                let final_out_path = if let Some(output_path) = &output_path {
                     let original_ext = Path::new(&original_name)
                         .extension()
-                        .and_then(|ext| ext.to_str())
-                        .map(|ext| format!(".{}", ext))
+                        .map(|ext| format!(".{}", ext.to_string_lossy()))
                         .unwrap_or("".to_string());
 
                     format!("{}{}", output_path.display(), original_ext)
@@ -150,7 +148,11 @@ impl Config {
                     format!("./{}", original_name)
                 };
 
-                fs::write(output_path, decoded)?;
+                fs::write(&final_out_path, decoded)?;
+                println!("Decoded payload saved to '{}'", final_out_path);
+                if output_path.is_some() {
+                    println!("Original file name was '{}'", original_name);
+                }
             }
         };
 
